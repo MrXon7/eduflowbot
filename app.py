@@ -10,7 +10,7 @@ from keep_alive import keep_alive
 # ============ KONFIGURATSIYA ============
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 ADMIN_ID = os.environ.get('ADMIN_ID', '5865675953')
-INVITE_LIMIT = 10
+INVITE_LIMIT = 1
 MINI_APP_URL = os.environ.get('MINI_APP_URL', 'https://your-app.web.app')
 
 # ============ LOGGING ============
