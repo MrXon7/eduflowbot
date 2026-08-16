@@ -9,6 +9,7 @@ from keep_alive import keep_alive
 
 # ============ KONFIGURATSIYA ============
 BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+ADMIN_ID = os.environ.get('ADMIN_ID', '5865675953')
 INVITE_LIMIT = 10
 MINI_APP_URL = os.environ.get('MINI_APP_URL', 'https://your-app.web.app')
 
@@ -18,6 +19,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# ============ ADMIN TEKSHIRISH ============
+def is_admin(user_id):
+    """Foydalanuvchi admin ekanligini tekshirish"""
+    return str(user_id) == str(ADMIN_ID)
 
 # ============ FLASK APP (Render uchun) ============
 flask_app = Flask(__name__)
@@ -79,45 +85,47 @@ async def handle_invite_payload(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     inviter = get_user(inviter_id)
-    if not inviter:
+    if not inviter and not is_admin(inviter_id):
         await update.message.reply_text("❌ Taklif qilgan foydalanuvchi topilmadi!")
         return
 
     user = get_user(user_id)
     if user is None:
         # Yangi foydalanuvchini ro'yxatdan o'tkazish
+        is_user_admin = is_admin(user_id)
         update_user(user_id, {
             "invite_count": 0,
-            "can_access": False,
+            "can_access": True if is_user_admin else False,
             "username": username,
             "invited_by": inviter_id,
             "created_at": datetime.utcnow().isoformat()
         })
         logger.info(f"🆕 Yangi foydalanuvchi: @{username} ({user_id}) taklif orqali qo'shildi")
 
-        # Inviterning hisobini oshirish
-        new_count = inviter.get("invite_count", 0) + 1
-        update_user(inviter_id, {"invite_count": new_count})
-        
-        # 10 ta bo'lsa, can_access = true
-        if new_count >= INVITE_LIMIT:
-            update_user(inviter_id, {"can_access": True})
-            logger.info(f"🎉 {inviter_id} {INVITE_LIMIT} ta taklif qildi! Kirish huquqi ochildi.")
+        # Inviterning hisobini oshirish (agar inviter bazada bo'lsa)
+        if inviter:
+            new_count = inviter.get("invite_count", 0) + 1
+            update_user(inviter_id, {"invite_count": new_count})
             
-            # Inviterga xabar yuborish
-            try:
-                await context.bot.send_message(
-                    chat_id=int(inviter_id),
-                    text=(
-                        f"🎉 Tabriklaymiz! Siz {INVITE_LIMIT} ta odam taklif qildingiz!\n"
-                        f"✅ Dasturga kirish huquqi ochildi!\n\n"
-                        f"🔗 /login - Dasturni ochish"
+            # 10 ta bo'lsa, can_access = true
+            if new_count >= INVITE_LIMIT:
+                update_user(inviter_id, {"can_access": True})
+                logger.info(f"🎉 {inviter_id} {INVITE_LIMIT} ta taklif qildi! Kirish huquqi ochildi.")
+                
+                # Inviterga xabar yuborish
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(inviter_id),
+                        text=(
+                            f"🎉 Tabriklaymiz! Siz {INVITE_LIMIT} ta odam taklif qildingiz!\n"
+                            f"✅ Dasturga kirish huquqi ochildi!\n\n"
+                            f"🔗 /login - Dasturni ochish"
+                        )
                     )
-                )
-            except Exception as e:
-                logger.error(f"Xabar yuborishda xatolik: {e}")
+                except Exception as e:
+                    logger.error(f"Xabar yuborishda xatolik: {e}")
         
-        inviter_username = inviter.get("username", "Noma lum")
+        inviter_username = inviter.get("username", "Admin" if is_admin(inviter_id) else "Noma lum") if inviter else "Admin"
         await update.message.reply_text(
             f"✅ Siz muvaffaqiyatli ro'yxatdan o'tdingiz!\n"
             f"👤 Taklif qilgan: @{inviter_username}\n\n"
@@ -126,7 +134,7 @@ async def handle_invite_payload(update: Update, context: ContextTypes.DEFAULT_TY
         )
     else:
         # Foydalanuvchi allaqachon ro'yxatdan o'tgan
-        if user.get("can_access", False):
+        if is_admin(user_id) or user.get("can_access", False):
             await update.message.reply_text(
                 f"👋 Qayta xush kelibsiz, @{username}!\n"
                 f"✅ Sizda dasturga kirish huquqi bor!\n\n"
@@ -158,15 +166,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if user is None:
         # Yangi foydalanuvchi
+        is_user_admin = is_admin(user_id)
         update_user(user_id, {
             "invite_count": 0,
-            "can_access": False,
+            "can_access": True if is_user_admin else False,
             "username": username,
             "created_at": datetime.utcnow().isoformat()
         })
         logger.info(f"🆕 Yangi foydalanuvchi: @{username} ({user_id})")
         user = get_user(user_id)
     
+    # Admin bo'lsa maxsus start paneli
+    if is_admin(user_id):
+        mini_app_link = f"{MINI_APP_URL}?userId={user_id}"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Dasturni ochish (Admin)", url=mini_app_link)]
+        ])
+        await update.message.reply_text(
+            f"👑 Xush kelibsiz, Admin @{username}!\n\n"
+            f"Sizda dasturga to'liq va cheksiz kirish huquqi mavjud.\n\n"
+            f"🛠 Maxsus Admin komandalari:\n"
+            f"👥 /users - Barcha foydalanuvchilar ro'yxati\n"
+            f"📊 /stats - Bot umumiy statistikasi\n\n"
+            f"📌 Umumiy komandalar:\n"
+            f"🔗 /login - Dasturni ochish\n"
+            f"📨 /invite - Taklif linki olish\n"
+            f"📈 /status - Holatingizni ko'rish",
+            reply_markup=keyboard
+        )
+        return
+
     if user.get("can_access", False):
         await update.message.reply_text(
             f"✅ Sizda dasturga kirish huquqi bor!\n"
@@ -202,7 +231,7 @@ async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📤 Ulashish", url=f"https://t.me/share/url?url={invite_link}&text=Dasturga%20qo%27shiling!")]
     ])
     
-    if user.get("can_access", False):
+    if is_admin(user_id) or user.get("can_access", False):
         await update.message.reply_text(
             f"✅ Siz allaqachon dasturga kira olasiz!\n"
             f"📊 Siz {user.get('invite_count', 0)} ta odam taklif qilgansiz.\n\n"
@@ -229,7 +258,7 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Iltimos, avval /start bosing!")
         return
     
-    if user.get("can_access", False):
+    if is_admin(user_id) or user.get("can_access", False):
         mini_app_link = f"{MINI_APP_URL}?userId={user_id}"
         
         keyboard = InlineKeyboardMarkup([
@@ -262,6 +291,22 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = max(0, INVITE_LIMIT - user.get("invite_count", 0))
     username = user.get('username', 'Noma lum')
     
+    if is_admin(user_id):
+        status_text = (
+            f"👑 ADMIN HOLATI\n"
+            f"{'='*30}\n\n"
+            f"👤 Admin: @{username}\n"
+            f"🆔 ID: {user_id}\n"
+            f"✅ Kirish huquqi: CHEKSIZ (ADMIN)\n"
+            f"📊 Takliflaringiz: {user.get('invite_count', 0)} ta\n\n"
+            f"🛠 Admin komandalari:\n"
+            f"👥 /users - Barcha foydalanuvchilar\n"
+            f"📊 /stats - Bot statistikasi\n"
+            f"🔗 /login - Dasturni ochish"
+        )
+        await update.message.reply_text(status_text)
+        return
+
     status_text = (
         f"📊 SIZNING HOLATINGIZ\n"
         f"{'='*30}\n\n"
@@ -277,6 +322,75 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_text += "❌ Dasturga kirish huquqi: YO'Q\n🔗 /invite - Taklif linki olish"
     
     await update.message.reply_text(status_text)
+
+# ============ ADMIN KOMANDALARI ============
+
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ /users - Barcha foydalanuvchilar ro'yxatini ko'rsatish (Admin) """
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Bu komanda faqat admin uchun!")
+        return
+
+    data = load_users()
+    users = data.get("users", {})
+
+    if not users:
+        await update.message.reply_text("ℹ️ Hozircha hech qanday foydalanuvchi ro'yxatdan o'tmagan.")
+        return
+
+    lines = [f"👥 BARCHA FOYDALANUVCHILAR ({len(users)} ta):\n{'='*30}\n"]
+    for uid, udata in users.items():
+        uname = udata.get("username", "Noma lum")
+        inv_cnt = udata.get("invite_count", 0)
+        has_access = "✅ Ha" if (udata.get("can_access", False) or is_admin(uid)) else "❌ Yo'q"
+        invited_by = udata.get("invited_by", "To'g'ridan-to'g'ri")
+        admin_mark = " [👑 ADMIN]" if is_admin(uid) else ""
+
+        line = (
+            f"👤 @{uname}{admin_mark}\n"
+            f"   🆔 ID: <code>{uid}</code>\n"
+            f"   📊 Takliflar: {inv_cnt}\n"
+            f"   🔑 Ruxsat: {has_access}\n"
+            f"   🔗 Taklif qilgan: {invited_by}\n"
+        )
+        lines.append(line)
+
+    full_text = ""
+    for item in lines:
+        if len(full_text) + len(item) > 3800:
+            await update.message.reply_text(full_text, parse_mode="HTML")
+            full_text = ""
+        full_text += item + "\n"
+
+    if full_text:
+        await update.message.reply_text(full_text, parse_mode="HTML")
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ /stats - Bot umumiy statistikasini ko'rsatish (Admin) """
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Bu komanda faqat admin uchun!")
+        return
+
+    data = load_users()
+    users = data.get("users", {})
+
+    total_users = len(users)
+    access_granted_users = sum(1 for uid, u in users.items() if u.get("can_access", False) or is_admin(uid))
+    completed_10_invites = sum(1 for u in users.values() if u.get("invite_count", 0) >= INVITE_LIMIT)
+    total_invites = sum(u.get("invite_count", 0) for u in users.values())
+
+    stats_text = (
+        f"📊 BOT STATISTIKASI\n"
+        f"{'='*30}\n\n"
+        f"👥 Jami foydalanuvchilar: {total_users} ta\n"
+        f"🔑 Kirish huquqi borlar: {access_granted_users} ta\n"
+        f"🎯 10+ ta taklif qilganlar: {completed_10_invites} ta\n"
+        f"📨 Jami berilgan takliflar: {total_invites} ta\n"
+    )
+
+    await update.message.reply_text(stats_text)
 
 # ============ MAIN ============
 
@@ -307,8 +421,10 @@ def main():
     application.add_handler(CommandHandler("invite", invite))
     application.add_handler(CommandHandler("login", login))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("users", users_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     
-    logger.info("🚀 Bot ishga tushdi!")
+    logger.info(f"🚀 Bot ishga tushdi! (Admin ID: {ADMIN_ID})")
     application.run_polling()
 
 if __name__ == "__main__":
