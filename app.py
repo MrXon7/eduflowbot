@@ -117,9 +117,10 @@ async def handle_invite_payload(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as e:
                 logger.error(f"Xabar yuborishda xatolik: {e}")
         
+        inviter_username = inviter.get("username", "Noma lum")
         await update.message.reply_text(
             f"✅ Siz muvaffaqiyatli ro'yxatdan o'tdingiz!\n"
-            f"👤 Taklif qilgan: @{inviter.get('username', 'Noma\'lum')}\n\n"
+            f"👤 Taklif qilgan: @{inviter_username}\n\n"
             f"🔗 /invite - O'z taklif linkingizni olish\n"
             f"📊 /status - Holatingizni ko'rish"
         )
@@ -259,7 +260,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     remaining = max(0, INVITE_LIMIT - user.get("invite_count", 0))
-    username = user.get('username', 'Noma\'lum')
+    username = user.get('username', 'Noma lum')
     
     status_text = (
         f"📊 SIZNING HOLATINGIZ\n"
